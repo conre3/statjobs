@@ -9,3 +9,5 @@ LazyData: true
 Imports: dplyr,
     httr,
     jsonlite
+Suggests: knitr
+VignetteBuilder: knitr

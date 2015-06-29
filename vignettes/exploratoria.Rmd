@@ -1,7 +1,7 @@
 ---
 title: "Analise exploratoria inicial"
 author: "Julio Trecenti"
-date: "2015-06-29"
+date: "`r Sys.Date()`"
 output: rmarkdown::html_vignette
 vignette: >
   %\VignetteIndexEntry{Analise exploratoria dos dados}
@@ -9,8 +9,7 @@ vignette: >
   %\VignetteEncoding{UTF-8}
 ---
 
-
-```r
+```{r}
 library(dplyr)
 library(tidyr)
 library(stringr)
@@ -21,8 +20,7 @@ library(lubridate)
 
 ## Analisando evolucao da Doris e do Guilherme no grupo
 
-
-```r
+```{r fig.width=9, fig.height=6}
 posts %>%
   filter(from_name %in% c('Doris S M Fontes', 'Guilherme Carrara Neto')) %>%
   mutate(time = ymd_hms(created_time)) %>%
@@ -35,35 +33,20 @@ posts %>%
   theme_bw()
 ```
 
-![plot of chunk unnamed-chunk-2](figure/unnamed-chunk-2-1.png) 
-
 ## Analisando as mensagens
 
 Tipos de posts
 
-
-```r
+```{r}
 posts %>%
   count(type, sort = TRUE) %>%
   mutate(` %` = round(n/sum(n) * 100, 2))
 ```
 
-```
-## Source: local data frame [5 x 3]
-## 
-##     type    n     %
-## 1   link 3101 54.19
-## 2 status 2501 43.71
-## 3  photo  108  1.89
-## 4  video   11  0.19
-## 5  event    1  0.02
-```
-
 Note que são dois tipos de posts principais, status e links. Vamos analisar
 separadamente.
 
-
-```r
+```{r}
 status <- posts %>% 
   filter(type %in% 'status')
 
@@ -74,72 +57,21 @@ link <- posts %>%
 Em relação aos status, podemos notar que existe uma grande quantidade de
 vagas do site www:.vagas.com.br
 
-
-```r
+```{r}
 status %>%
   mutate(vagas = str_detect(message, 'www\\.vagas\\.com\\.br')) %>%
   count(vagas, sort = TRUE)
 ```
 
-```
-## Source: local data frame [3 x 2]
-## 
-##   vagas    n
-## 1 FALSE 1571
-## 2  TRUE  923
-## 3    NA    7
-```
-
 Geralmente, os posts desse site contém um padrão conhecido.
 
-
-```r
+```{r}
 aux <- status %>%
   mutate(vagas = str_detect(message, 'www\\.vagas\\.com\\.br')) %>%
   filter(vagas) %>%
   slice(1) %>% 
   select(from_name, message) %>% 
   sapply(function(x) {cat(x); cat('\n\n@@@@@@@\n\n')})
-```
-
-```
-## Guilherme Carrara Neto
-## 
-## @@@@@@@
-## 
-## Latin America Strategic Workforce Planning Coordinator (GE - General Electric)
-## Nível hierárquico:Supervisão/Coordenação
-## Local:São Paulo / SP / BR
-## Quantidade de vagas:1
-## 
-## Role Summary/Purpose 
-## We are looking for a Strategic Workforce Planning Coordinator to join a growing team focused on delivering a data-driven consultative experience to internal business clients. Through consultative engagements, the SWP team quantifies and assesses the supply and demand of talent required to successfully inform and execute business strategy.
-## 
-## Essential Responsibilities 
-## The SWFP Coordinator would be engaged in developing and delivering insights for complex workforce planning projects and programs using inputs from a variety of data sources, business leaders and HR Business Partners. This role will drive the projects derived from the WPF analysis. Areas of concentration include consulting, project management, headcount forecasting, scenario planning, and gap analysis.
-## Consult with business partners to identify workforce needs, develop hypotheses and execute related quantitative analyses, (e.g. attrition, retirement, and movement)
-## Lead the development of a compelling story through data and transform complex data elements into a consumable format for various levels of management.
-## Synthesize analyses through activities into comprehensive presentations to foster discussion and communicate key insights.
-## Identify and incorporate multiple data elements to support analysis. Facilitate conversations with data owners to ensure proper utilization and management of the data.
-## Execute research and analysis and interpret findings to support the identification of solutions that address organizational gaps.
-## Lead all the project management activities to ensure the thorough execution of special projects derives from WFP analysis. Continued development of key data sources, tools, templates and processes.
-## 
-## Qualifications/Requirements 
-## Bachelor's degree in economics, Mathematics, Statistics, human resources or a related field.
-## 3-7 years of analytical and/or consulting experience.
-## strong data management skills
-## Demonstrated ability to apply consultative mind-set, problem-solving and critical thinking.
-## Team player with strong interpersonal and executive communication.
-## Ability to balance multiple priorities simultaneously and meet deadlines as required.
-## Proficiency in Microsoft Office Suite (Word, Excel, Access, PowerPoint, Plateu, Datamanagement)
-## 
-## Desired Characteristics 
-## Strategic workforce planning experience
-## Statistic and project management experience.
-## 
-## http://www.vagas.com.br/vagas/v1195884/latin-america-strategic-workforce-planning-coordinator
-## 
-## @@@@@@@
 ```
 
 Algumas informações úteis que podem ser extraídas:
@@ -149,8 +81,8 @@ Algumas informações úteis que podem ser extraídas:
 - Atividades
 - Requisitos
 
+```{r}
 
-```r
 antes <- c('([^a-zA-Z]|^)formacao\\:?\n?( e pre\\-requisitos\\:)?',
            'academica\\:?\n?',
            '([^a-zA-Z]|^)cursar',
@@ -170,32 +102,16 @@ vagas <- status %>%
 
 Em relação ao nível hierárquico, temos o seguinte resultado:
 
-
-```r
+```{r}
 vagas %>%
   count(nivel, sort = TRUE) %>%
   mutate(` %` = round(n/sum(n) * 100, 2)) %>%
   knitr::kable()
 ```
 
-
-
-|nivel                  |   n|     %|
-|:----------------------|---:|-----:|
-|Estágio                | 221| 23.94|
-|Pleno                  | 212| 22.97|
-|Júnior/Trainee         | 199| 21.56|
-|Sênior                 | 189| 20.48|
-|Supervisão/Coordenação |  43|  4.66|
-|Auxiliar/Operacional   |  25|  2.71|
-|NA                     |  17|  1.84|
-|Gerência               |  13|  1.41|
-|Técnico                |   4|  0.43|
-
 Em relação ao local, temos:
 
-
-```r
+```{r}
 vagas %>%
   count(local, sort = TRUE) %>%
   mutate(` %` = round(n/sum(n) * 100, 2)) %>%
@@ -203,25 +119,9 @@ vagas %>%
   knitr::kable()
 ```
 
-
-
-|local                             |   n|     %|
-|:---------------------------------|---:|-----:|
-|São Paulo / SP / BR               | 274| 29.69|
-|Rio de Janeiro / RJ / BR          | 130| 14.08|
-|Curitiba / PR / BR                |  38|  4.12|
-|Rio de Janeiro / RJ / BR - Centro |  30|  3.25|
-|Belo Horizonte / MG / BR          |  27|  2.93|
-|NA                                |  24|  2.60|
-|Barueri / SP / BR                 |  20|  2.17|
-|Brasil                            |  19|  2.06|
-|São Paulo / BR                    |  17|  1.84|
-|Campinas / SP / BR                |  16|  1.73|
-
 O grafico abaixo mostra quais os termos mais frequentes quando se fala em formação.
 
-
-```r
+```{r fig.width=9, fig.height=6}
 # aux <- vagas %>%
 #   sample_n(1) %>% 
 #   select(from_name, message, form) %>% 
@@ -253,13 +153,10 @@ cursos %>%
   theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 12))
 ```
 
-![plot of chunk unnamed-chunk-10](figure/unnamed-chunk-10-1.png) 
-
 O grafico abaixo mostra quais os termos mais frequentes quando se fala em formação,
 apenas quando aparece o nome "estatistica".
 
-
-```r
+```{r fig.width=9, fig.height=6}
 cursos %>%
   filter(!is.na(estatistica)) %>%
   summarise_each(funs(sum(!is.na(.))), matematica:estatistica) %>%
@@ -275,8 +172,6 @@ cursos %>%
   ylab('proporcao') +
   theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 12))
 ```
-
-![plot of chunk unnamed-chunk-11](figure/unnamed-chunk-11-1.png) 
 
 TODO
 
