@@ -10,19 +10,29 @@ vignette: >
 ---
 
 ```{r}
+# dados e api
+library(statjobs)
+
+# hadley
 library(dplyr)
 library(tidyr)
 library(stringr)
 library(ggplot2)
-library(statjobs)
 library(lubridate)
+
+# text mining
+library(tm)
+library(textcat)
+library(RWeka)
+library(wordcloud)
 ```
 
 ## Analisando evolucao da Doris e do Guilherme no grupo
 
 ```{r fig.width=9, fig.height=6}
 posts %>%
-  filter(from_name %in% c('Doris S M Fontes', 'Guilherme Carrara Neto')) %>%
+  filter(from_name %in% c('Doris S M Fontes', 
+                          'Guilherme Carrara Neto')) %>%
   mutate(time = ymd_hms(created_time)) %>%
   arrange(time) %>%
   group_by(from_name) %>%
@@ -31,6 +41,122 @@ posts %>%
   ggplot(aes(x = time, y = acu, colour = from_name)) +
   geom_line() +
   theme_bw()
+```
+
+## Tratando os textos e analisando com text mining usual
+
+Primeiro, vamos dar uma limpada nos textos. Consideramos só os textos em
+portugues, de inicio!
+
+- ignore case
+- remove punctuation
+- remove stop words
+- remove accents
+- remove numbers
+- remove links and emails
+
+```{r}
+prof <- TC_byte_profiles[names(TC_byte_profiles) %in% c("english", "portuguese")]
+posts_messages <- posts %>%
+  filter(!is.na(message), type %in% c('status', 'link')) %>%
+  mutate(lingua = textcat(message, p = prof)) %>%
+  filter(lingua == 'portuguese')
+
+# rm_accent SO FUNCIONA EM LINUX!!!!!!!!!!!!!!!!!!!!
+rm_accent <- function(x) gsub("`|\\'", "", iconv(x, to = "ASCII//TRANSLIT"))
+tira_barras <- function(x) gsub('/+|(\\:)+', ' ', x)
+tira_emails <- function(x) gsub('[a-zA-Z]+@[a-zA-Z\\-]+\\.[a-zA-Z]+', '', x)
+tira_links <- function(x) gsub('http[^ ]+', ' ', x)
+# tira_s <- function(x) {gsub('spss', 'spsss', x); gsub('s ', ' ', x)}
+
+banned_words <- c('vaga[^ ]*', 'todo', 'toda', 'trabalh[^ ]*', 
+                  'paulo', 'acompanha[^ ]*', 'principal[^ ]*',
+                  'profission[^ ]*', 'estatistic[^ ]*',
+                  'expiracao', 'janeiro', 'fevereiro', 'marco',
+                  'abril', 'maio', 'junho', 'julho', 'agosto',
+                  'setembro', 'outubro', 'novembro', 'dezembro',
+                  'senior', 'pleno', 'dado', 'data', 'local',
+                  'codigo', 'nivel', 'hierarquico', 'rio', 'junior',
+                  'estagio', 'quantidade', ' [a-z] ')
+banned_words <- paste(banned_words, collapse = '|')
+tira_banned <- function(x) gsub(banned_words, ' ', x)
+
+d_tm_raw <- VCorpus(VectorSource(posts_messages$message))
+d_tm <- d_tm_raw %>%
+  tm_map(stripWhitespace) %>%
+  tm_map(content_transformer(tolower)) %>%
+  tm_map(content_transformer(tira_emails)) %>%
+  tm_map(content_transformer(tira_links)) %>%
+  tm_map(content_transformer(tira_barras)) %>%
+  tm_map(removeWords, stopwords('pt-br')) %>%
+  tm_map(removePunctuation, preserve_intra_word_dashes = TRUE) %>%
+  tm_map(content_transformer(rm_accent)) %>%
+  tm_map(content_transformer(tira_links)) %>%
+  tm_map(removeWords, unique(rm_accent(stopwords('pt-br')))) %>%
+  tm_map(content_transformer(tira_banned)) %>%
+  # tm_map(content_transformer(tira_s)) %>%
+  tm_map(removeNumbers) %>%
+  tm_map(stripWhitespace)
+```
+
+### Term document matrix, usando 1-gram e tfidf weighting, sem stemming
+
+```{r}
+ctrl <- list(weighting = function(x) weightTfIdf(x, normalize = FALSE))
+dtm <- DocumentTermMatrix(d_tm, control = ctrl)
+dtm <- removeSparseTerms(dtm, 0.95)
+
+# como padrao dtm é uma matriz esparsa, boa pra guardar dados mas ruim pra explorar
+# por sorte a base de dados é pequena e da pra transformar em data.frame
+d_dtm <- data.frame(as.matrix(dtm)) %>%
+  add_rownames() %>%
+  tbl_df()
+
+# pegando as 10 palavras "mais informativas" de cada documento
+palavras <- d_dtm %>%
+  mutate(rowname = as.numeric(rowname)) %>%
+  gather(key, val, -rowname) %>%
+  arrange(desc(val)) %>%
+  group_by(rowname) %>%
+  slice(1:10) %>%
+  ungroup %>%
+  filter(val > 0)
+
+wordcloud(palavras$key, 
+          max.words = 100, 
+          colors = brewer.pal(8, 'Dark2'))
+```
+
+### Term document matrix, usando 2-gram e tfidf weighting, sem stemming
+
+Nao rodou :(
+
+```{r}
+# BigramTokenizer <- function(x) NGramTokenizer(x, Weka_control(min = 2, max = 2))
+# ctrl <- list(tokenize = BigramTokenizer)
+# dtm <- DocumentTermMatrix(d_tm, control = ctrl)
+# dtm <- removeSparseTerms(dtm, 0.95)
+# 
+# # como padrao dtm é uma matriz esparsa, boa pra guardar dados mas ruim pra explorar
+# # por sorte a base de dados é pequena e da pra transformar em data.frame
+# d_dtm <- data.frame(as.matrix(dtm)) %>%
+#   add_rownames() %>%
+#   tbl_df()
+# 
+# # pegando as 10 palavras "mais informativas" de cada documento
+# palavras <- d_dtm %>%
+#   mutate(rowname = as.numeric(rowname)) %>%
+#   gather(key, val, -rowname) %>%
+#   arrange(desc(val)) %>%
+#   group_by(rowname) %>%
+#   slice(1:10) %>%
+#   ungroup %>%
+#   filter(val > 0)
+# 
+# library(wordcloud)
+# wordcloud(palavras$key, 
+#           max.words = 100, 
+#           colors = brewer.pal(8, 'Dark2'))
 ```
 
 ## Analisando as mensagens

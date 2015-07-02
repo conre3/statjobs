@@ -1,7 +1,7 @@
 ---
 title: "Analise exploratoria inicial"
 author: "Julio Trecenti"
-date: "2015-06-29"
+date: "2015-07-02"
 output: rmarkdown::html_vignette
 vignette: >
   %\VignetteIndexEntry{Analise exploratoria dos dados}
@@ -9,46 +9,56 @@ vignette: >
   %\VignetteEncoding{UTF-8}
 ---
 
-# statjobs
-
-Pesquisa Statjobs usando Graph API do Facebook
-
-## Instalação
-
-Este pacote não está disponível no CRAN. Para instalá-lo, utilize o pacote `devtools`, fazendo
-
-```
-devtools::install_github('conre3/statjobs')
-```
-
-## Pequeno manual de utilização
-
-- Pegue um **access token** temporário na página https://developers.facebook.com/tools/explorer (um código enorme)
-- rode
-
-```
-at <- 'codigo enorme'
-lista <- statjobs::baixa_posts(at)
-dados <- statjobs::arruma_posts(lista)
-```
-
-O pacote já vem com uma base baixada em 2015-06-25. Para carregar, rode
-
-```
-data(posts, package = 'statjobs')
-```
-
-Divirta-se ;)
-
-# Analise inicial
 
 ```r
+# dados e api
+library(statjobs)
+
+# hadley
 library(dplyr)
+```
+
+```
+## 
+## Attaching package: 'dplyr'
+## 
+## The following object is masked from 'package:stats':
+## 
+##     filter
+## 
+## The following objects are masked from 'package:base':
+## 
+##     intersect, setdiff, setequal, union
+```
+
+```r
 library(tidyr)
 library(stringr)
 library(ggplot2)
-library(statjobs)
 library(lubridate)
+
+# text mining
+library(tm)
+```
+
+```
+## Loading required package: NLP
+## 
+## Attaching package: 'NLP'
+## 
+## The following object is masked from 'package:ggplot2':
+## 
+##     annotate
+```
+
+```r
+library(textcat)
+library(RWeka)
+library(wordcloud)
+```
+
+```
+## Loading required package: RColorBrewer
 ```
 
 ## Analisando evolucao da Doris e do Guilherme no grupo
@@ -56,7 +66,8 @@ library(lubridate)
 
 ```r
 posts %>%
-  filter(from_name %in% c('Doris S M Fontes', 'Guilherme Carrara Neto')) %>%
+  filter(from_name %in% c('Doris S M Fontes', 
+                          'Guilherme Carrara Neto')) %>%
   mutate(time = ymd_hms(created_time)) %>%
   arrange(time) %>%
   group_by(from_name) %>%
@@ -68,6 +79,300 @@ posts %>%
 ```
 
 ![plot of chunk unnamed-chunk-2](figure/unnamed-chunk-2-1.png) 
+
+## Tratando os textos e analisando com text mining usual
+
+Primeiro, vamos dar uma limpada nos textos. Consideramos só os textos em
+portugues, de inicio!
+
+- ignore case
+- remove punctuation
+- remove stop words
+- remove accents
+- remove numbers
+- remove links and emails
+
+
+```r
+prof <- TC_byte_profiles[names(TC_byte_profiles) %in% c("english", "portuguese")]
+posts_messages <- posts %>%
+  filter(!is.na(message), type %in% c('status', 'link')) %>%
+  mutate(lingua = textcat(message, p = prof)) %>%
+  filter(lingua == 'portuguese')
+
+# rm_accent SO FUNCIONA EM LINUX!!!!!!!!!!!!!!!!!!!!
+rm_accent <- function(x) gsub("`|\\'", "", iconv(x, to = "ASCII//TRANSLIT"))
+tira_barras <- function(x) gsub('/+|(\\:)+', ' ', x)
+tira_emails <- function(x) gsub('[a-zA-Z]+@[a-zA-Z\\-]+\\.[a-zA-Z]+', '', x)
+tira_links <- function(x) gsub('http[^ ]+', ' ', x)
+# tira_s <- function(x) {gsub('spss', 'spsss', x); gsub('s ', ' ', x)}
+
+banned_words <- c('vaga[^ ]*', 'todo', 'toda', 'trabalh[^ ]*', 
+                  'paulo', 'acompanha[^ ]*', 'principal[^ ]*',
+                  'profission[^ ]*', 'estatistic[^ ]*',
+                  'expiracao', 'janeiro', 'fevereiro', 'marco',
+                  'abril', 'maio', 'junho', 'julho', 'agosto',
+                  'setembro', 'outubro', 'novembro', 'dezembro',
+                  'senior', 'pleno', 'dado', 'data', 'local',
+                  'codigo', 'nivel', 'hierarquico', 'rio', 'junior',
+                  'estagio', 'quantidade', ' [a-z] ')
+banned_words <- paste(banned_words, collapse = '|')
+tira_banned <- function(x) gsub(banned_words, ' ', x)
+
+d_tm_raw <- VCorpus(VectorSource(posts_messages$message))
+d_tm <- d_tm_raw %>%
+  tm_map(stripWhitespace) %>%
+  tm_map(content_transformer(tolower)) %>%
+  tm_map(content_transformer(tira_emails)) %>%
+  tm_map(content_transformer(tira_links)) %>%
+  tm_map(content_transformer(tira_barras)) %>%
+  tm_map(removeWords, stopwords('pt-br')) %>%
+  tm_map(removePunctuation, preserve_intra_word_dashes = TRUE) %>%
+  tm_map(content_transformer(rm_accent)) %>%
+  tm_map(content_transformer(tira_links)) %>%
+  tm_map(removeWords, unique(rm_accent(stopwords('pt-br')))) %>%
+  tm_map(content_transformer(tira_banned)) %>%
+  # tm_map(content_transformer(tira_s)) %>%
+  tm_map(removeNumbers) %>%
+  tm_map(stripWhitespace)
+```
+
+### Term document matrix, usando 1-gram e tfidf weighting, sem stemming
+
+
+```r
+ctrl <- list(weighting = function(x) weightTfIdf(x, normalize = FALSE))
+dtm <- DocumentTermMatrix(d_tm, control = ctrl)
+dtm <- removeSparseTerms(dtm, 0.95)
+
+# como padrao dtm é uma matriz esparsa, boa pra guardar dados mas ruim pra explorar
+# por sorte a base de dados é pequena e da pra transformar em data.frame
+d_dtm <- data.frame(as.matrix(dtm)) %>%
+  add_rownames() %>%
+  tbl_df()
+
+# pegando as 10 palavras "mais informativas" de cada documento
+palavras <- d_dtm %>%
+  mutate(rowname = as.numeric(rowname)) %>%
+  gather(key, val, -rowname) %>%
+  arrange(desc(val)) %>%
+  group_by(rowname) %>%
+  slice(1:10) %>%
+  ungroup %>%
+  filter(val > 0)
+
+wordcloud(palavras$key, 
+          max.words = 100, 
+          colors = brewer.pal(8, 'Dark2'))
+```
+
+```
+## Warning in wordcloud(palavras$key, max.words = 100, colors =
+## brewer.pal(8, : marketing could not be fit on page. It will not be plotted.
+```
+
+```
+## Warning in wordcloud(palavras$key, max.words = 100, colors =
+## brewer.pal(8, : desenvolvimento could not be fit on page. It will not be
+## plotted.
+```
+
+```
+## Warning in wordcloud(palavras$key, max.words = 100, colors =
+## brewer.pal(8, : logistica could not be fit on page. It will not be plotted.
+```
+
+```
+## Warning in wordcloud(palavras$key, max.words = 100, colors =
+## brewer.pal(8, : business could not be fit on page. It will not be plotted.
+```
+
+```
+## Warning in wordcloud(palavras$key, max.words = 100, colors =
+## brewer.pal(8, : inscricoes could not be fit on page. It will not be
+## plotted.
+```
+
+```
+## Warning in wordcloud(palavras$key, max.words = 100, colors =
+## brewer.pal(8, : campanhas could not be fit on page. It will not be plotted.
+```
+
+```
+## Warning in wordcloud(palavras$key, max.words = 100, colors =
+## brewer.pal(8, : programa could not be fit on page. It will not be plotted.
+```
+
+```
+## Warning in wordcloud(palavras$key, max.words = 100, colors =
+## brewer.pal(8, : coordenacao could not be fit on page. It will not be
+## plotted.
+```
+
+```
+## Warning in wordcloud(palavras$key, max.words = 100, colors =
+## brewer.pal(8, : processo could not be fit on page. It will not be plotted.
+```
+
+```
+## Warning in wordcloud(palavras$key, max.words = 100, colors =
+## brewer.pal(8, : crm could not be fit on page. It will not be plotted.
+```
+
+```
+## Warning in wordcloud(palavras$key, max.words = 100, colors =
+## brewer.pal(8, : manutencao could not be fit on page. It will not be
+## plotted.
+```
+
+```
+## Warning in wordcloud(palavras$key, max.words = 100, colors =
+## brewer.pal(8, : horas could not be fit on page. It will not be plotted.
+```
+
+```
+## Warning in wordcloud(palavras$key, max.words = 100, colors =
+## brewer.pal(8, : risco could not be fit on page. It will not be plotted.
+```
+
+```
+## Warning in wordcloud(palavras$key, max.words = 100, colors =
+## brewer.pal(8, : plano could not be fit on page. It will not be plotted.
+```
+
+```
+## Warning in wordcloud(palavras$key, max.words = 100, colors =
+## brewer.pal(8, : assistencia could not be fit on page. It will not be
+## plotted.
+```
+
+```
+## Warning in wordcloud(palavras$key, max.words = 100, colors =
+## brewer.pal(8, : gerar could not be fit on page. It will not be plotted.
+```
+
+```
+## Warning in wordcloud(palavras$key, max.words = 100, colors =
+## brewer.pal(8, : vendas could not be fit on page. It will not be plotted.
+```
+
+```
+## Warning in wordcloud(palavras$key, max.words = 100, colors =
+## brewer.pal(8, : oferece could not be fit on page. It will not be plotted.
+```
+
+```
+## Warning in wordcloud(palavras$key, max.words = 100, colors =
+## brewer.pal(8, : comercial could not be fit on page. It will not be plotted.
+```
+
+```
+## Warning in wordcloud(palavras$key, max.words = 100, colors =
+## brewer.pal(8, : experiencia could not be fit on page. It will not be
+## plotted.
+```
+
+```
+## Warning in wordcloud(palavras$key, max.words = 100, colors =
+## brewer.pal(8, : curso could not be fit on page. It will not be plotted.
+```
+
+```
+## Warning in wordcloud(palavras$key, max.words = 100, colors =
+## brewer.pal(8, : planos could not be fit on page. It will not be plotted.
+```
+
+```
+## Warning in wordcloud(palavras$key, max.words = 100, colors =
+## brewer.pal(8, : trainee could not be fit on page. It will not be plotted.
+```
+
+```
+## Warning in wordcloud(palavras$key, max.words = 100, colors =
+## brewer.pal(8, : pretensao could not be fit on page. It will not be plotted.
+```
+
+```
+## Warning in wordcloud(palavras$key, max.words = 100, colors =
+## brewer.pal(8, : regiao could not be fit on page. It will not be plotted.
+```
+
+```
+## Warning in wordcloud(palavras$key, max.words = 100, colors =
+## brewer.pal(8, : dia could not be fit on page. It will not be plotted.
+```
+
+```
+## Warning in wordcloud(palavras$key, max.words = 100, colors =
+## brewer.pal(8, : analise could not be fit on page. It will not be plotted.
+```
+
+```
+## Warning in wordcloud(palavras$key, max.words = 100, colors =
+## brewer.pal(8, : empresa could not be fit on page. It will not be plotted.
+```
+
+```
+## Warning in wordcloud(palavras$key, max.words = 100, colors =
+## brewer.pal(8, : contato could not be fit on page. It will not be plotted.
+```
+
+```
+## Warning in wordcloud(palavras$key, max.words = 100, colors =
+## brewer.pal(8, : auxilio could not be fit on page. It will not be plotted.
+```
+
+```
+## Warning in wordcloud(palavras$key, max.words = 100, colors =
+## brewer.pal(8, : financeiro could not be fit on page. It will not be
+## plotted.
+```
+
+```
+## Warning in wordcloud(palavras$key, max.words = 100, colors =
+## brewer.pal(8, : pesquisa could not be fit on page. It will not be plotted.
+```
+
+```
+## Warning in wordcloud(palavras$key, max.words = 100, colors =
+## brewer.pal(8, : odontologico could not be fit on page. It will not be
+## plotted.
+```
+
+![plot of chunk unnamed-chunk-4](figure/unnamed-chunk-4-1.png) 
+
+### Term document matrix, usando 2-gram e tfidf weighting, sem stemming
+
+Nao rodou :(
+
+
+```r
+# BigramTokenizer <- function(x) NGramTokenizer(x, Weka_control(min = 2, max = 2))
+# ctrl <- list(tokenize = BigramTokenizer)
+# dtm <- DocumentTermMatrix(d_tm, control = ctrl)
+# dtm <- removeSparseTerms(dtm, 0.95)
+# 
+# # como padrao dtm é uma matriz esparsa, boa pra guardar dados mas ruim pra explorar
+# # por sorte a base de dados é pequena e da pra transformar em data.frame
+# d_dtm <- data.frame(as.matrix(dtm)) %>%
+#   add_rownames() %>%
+#   tbl_df()
+# 
+# # pegando as 10 palavras "mais informativas" de cada documento
+# palavras <- d_dtm %>%
+#   mutate(rowname = as.numeric(rowname)) %>%
+#   gather(key, val, -rowname) %>%
+#   arrange(desc(val)) %>%
+#   group_by(rowname) %>%
+#   slice(1:10) %>%
+#   ungroup %>%
+#   filter(val > 0)
+# 
+# library(wordcloud)
+# wordcloud(palavras$key, 
+#           max.words = 100, 
+#           colors = brewer.pal(8, 'Dark2'))
+```
 
 ## Analisando as mensagens
 
@@ -285,7 +590,7 @@ cursos %>%
   theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 12))
 ```
 
-![plot of chunk unnamed-chunk-10](figure/unnamed-chunk-10-1.png) 
+![plot of chunk unnamed-chunk-13](figure/unnamed-chunk-13-1.png) 
 
 O grafico abaixo mostra quais os termos mais frequentes quando se fala em formação,
 apenas quando aparece o nome "estatistica".
@@ -308,11 +613,10 @@ cursos %>%
   theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 12))
 ```
 
-![plot of chunk unnamed-chunk-11](figure/unnamed-chunk-11-1.png) 
+![plot of chunk unnamed-chunk-14](figure/unnamed-chunk-14-1.png) 
 
 TODO
 
 - Pegar atividades
 - Pegar requisitos
 - Pegar desejáveis
-
